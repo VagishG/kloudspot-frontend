@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   MapPin,
   ChevronDown,
@@ -6,11 +6,40 @@ import {
 } from "lucide-react";
 
 import NotificationPanel from "./NotificationPanel";
+import { useSite } from "../context/SiteContext";
 
 export default function Topbar() {
 
   const [notificationsOpen, setNotificationsOpen] =
     useState(false);
+
+  const [siteDropdownOpen, setSiteDropdownOpen] =
+    useState(false);
+
+  const dropdownRef = useRef(null);
+
+  const {
+    sites,
+    selectedSite,
+    selectSite,
+    loading: sitesLoading,
+  } = useSite();
+
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setSiteDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () =>
+      document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
 
   return (
@@ -49,41 +78,118 @@ export default function Topbar() {
           <div className="h-5 w-px bg-gray-300" />
 
 
-          {/* Location */}
+          {/* Location Picker */}
 
-          <button
-            className="
-              h-8
-              px-3
-              flex
-              items-center
-              gap-2
-              rounded-md
-              border
-              border-gray-300
-              bg-white
-              text-sm
-              text-gray-700
-              hover:bg-gray-50
-              transition
-            "
+          <div
+            className="relative"
+            ref={dropdownRef}
           >
 
-            <MapPin
-              size={15}
-              strokeWidth={2}
-            />
+            <button
+              onClick={() =>
+                setSiteDropdownOpen((prev) => !prev)
+              }
+              className="
+                h-8
+                px-3
+                flex
+                items-center
+                gap-2
+                rounded-md
+                border
+                border-gray-300
+                bg-white
+                text-sm
+                text-gray-700
+                hover:bg-gray-50
+                transition
+              "
+            >
 
-            <span>
-              Avenue Mall
-            </span>
+              <MapPin
+                size={15}
+                strokeWidth={2}
+              />
 
-            <ChevronDown
-              size={14}
-              className="text-gray-500"
-            />
+              <span>
+                {sitesLoading
+                  ? "Loading..."
+                  : selectedSite?.name || "Select Site"}
+              </span>
 
-          </button>
+              <ChevronDown
+                size={14}
+                className={`text-gray-500 transition-transform ${
+                  siteDropdownOpen ? "rotate-180" : ""
+                }`}
+              />
+
+            </button>
+
+
+            {/* Dropdown */}
+
+            {siteDropdownOpen && sites.length > 0 && (
+              <div
+                className="
+                  absolute
+                  left-0
+                  top-full
+                  mt-1
+                  min-w-[220px]
+                  rounded-md
+                  border
+                  border-gray-200
+                  bg-white
+                  shadow-lg
+                  py-1
+                  z-50
+                "
+              >
+
+                {sites.map((site) => (
+                  <button
+                    key={site.siteId}
+                    onClick={() => {
+                      selectSite(site.siteId);
+                      setSiteDropdownOpen(false);
+                    }}
+                    className={`
+                      w-full
+                      px-4
+                      py-2.5
+                      text-left
+                      text-sm
+                      flex
+                      items-center
+                      gap-2
+                      transition
+                      ${
+                        selectedSite?.siteId === site.siteId
+                          ? "bg-[#e8f5f4] text-[#039a94] font-medium"
+                          : "text-gray-700 hover:bg-gray-50"
+                      }
+                    `}
+                  >
+                    <MapPin size={13} strokeWidth={2} />
+
+                    <div className="min-w-0">
+                      <div className="truncate">
+                        {site.name}
+                      </div>
+
+                      <div className="text-[10px] text-gray-400">
+                        {site.city}, {site.country}
+                      </div>
+                    </div>
+
+                  </button>
+                ))}
+
+              </div>
+            )}
+
+          </div>
 
         </div>
 

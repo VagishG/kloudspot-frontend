@@ -1,4 +1,4 @@
-import React, { useState,useEffect   } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { login } from "../api/api.js";
@@ -14,14 +14,15 @@ export default function Login() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-  const token = localStorage.getItem("token");
+    const token = localStorage.getItem("token");
 
-  if (token) {
-    navigate("/dashboard", {
-      replace: true,
-    });
-  }
-}, [navigate]);
+    if (token) {
+      navigate("/dashboard", {
+        replace: true,
+      });
+    }
+  }, [navigate]);
+
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -46,12 +47,18 @@ export default function Login() {
         localStorage.setItem("token", data.accessToken);
       }
 
+      // Store user info if available
+      if (data?.user) {
+        localStorage.setItem("user", JSON.stringify(data.user));
+      }
+
       navigate("/dashboard");
     } catch (err) {
       console.error("Login failed:", err);
 
       setError(
         err?.message ||
+          err?.errorMessage ||
           err?.error ||
           "Invalid username or password"
       );

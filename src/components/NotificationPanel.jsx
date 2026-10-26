@@ -1,63 +1,66 @@
-import React from "react";
+import React, {
+  useState,
+  useEffect,
+} from "react";
+
 import {
   X,
   MapPin,
-  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 
-const alerts = [
-  {
-    id: 1,
-    time: "March 03 2025  10:12",
-    title: "Ahmad Entered",
-    zone: "Zone A",
-    priority: "High",
-  },
-  {
-    id: 2,
-    time: "March 03 2025  10:12",
-    title: "Mathew Entered",
-    zone: "Zone B",
-    priority: "Medium",
-  },
-  {
-    id: 3,
-    time: "March 03 2025  10:12",
-    title: "Rony Entered",
-    zone: "Zone B",
-    priority: "High",
-  },
-  {
-    id: 4,
-    time: "March 03 2025  10:12",
-    title: "Rony Entered",
-    zone: "Zone B",
-    priority: "Low",
-  },
-  {
-    id: 5,
-    time: "March 03 2025  10:12",
-    title: "Rony Entered",
-    zone: "Zone B",
-    priority: "Low",
-  },
-  {
-    id: 6,
-    time: "March 03 2025  10:12",
-    title: "Rony Entered",
-    zone: "Zone B",
-    priority: "High",
-  },
-  {
-    id: 7,
-    time: "March 03 2025  10:12",
-    title: "Rony Entered",
-    zone: "Zone B",
-    priority: "High",
-  },
-];
+import { getEntryExit, getTodayRange } from "../api/api";
+import { useSite } from "../context/SiteContext";
+
 
 export default function NotificationPanel({ onClose }) {
+
+  const { selectedSite } = useSite();
+
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+
+  useEffect(() => {
+    async function fetchAlerts() {
+      if (!selectedSite) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { fromUtc, toUtc } = getTodayRange();
+        const res = await getEntryExit({
+          siteId: selectedSite.siteId,
+          fromUtc,
+          toUtc,
+          pageSize: 20,
+          pageNumber: 1,
+        });
+
+        // Convert entry-exit records into alert-style items
+        const items = (res?.records || []).map((r, idx) => ({
+          id: `${r.personId}-${r.entryUtc}-${idx}`,
+          time: r.entryLocal || new Date(r.entryUtc).toLocaleString(),
+          title: `${r.personName || r.personId || "Unknown"} Entered`,
+          zone: r.zoneName || r.zoneId || "Unknown Zone",
+          priority: r.severity
+            ? r.severity.charAt(0).toUpperCase() + r.severity.slice(1)
+            : "Low",
+        }));
+
+        setAlerts(items);
+      } catch (err) {
+        console.error("Failed to fetch alerts:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchAlerts();
+  }, [selectedSite]);
+
+
   return (
     <>
       {/* =========================================
@@ -114,6 +117,11 @@ export default function NotificationPanel({ onClose }) {
 
           <h2 className="text-sm font-semibold text-gray-800">
             Alerts
+            {alerts.length > 0 && (
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                ({alerts.length})
+              </span>
+            )}
           </h2>
 
           <button
@@ -143,16 +151,27 @@ export default function NotificationPanel({ onClose }) {
 
         <div className="flex-1 overflow-y-auto p-2">
 
-          <div className="flex flex-col gap-2">
+          {loading ? (
+            <div className="flex items-center justify-center h-32 text-gray-400">
+              <Loader2 size={20} className="animate-spin" />
+              <span className="ml-2 text-sm">Loading alerts...</span>
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+              No alerts for today
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
 
-            {alerts.map((alert) => (
-              <AlertItem
-                key={alert.id}
-                alert={alert}
-              />
-            ))}
+              {alerts.map((alert) => (
+                <AlertItem
+                  key={alert.id}
+                  alert={alert}
+                />
+              ))}
 
-          </div>
+            </div>
+          )}
 
         </div>
 

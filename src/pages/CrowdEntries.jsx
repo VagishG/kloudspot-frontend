@@ -1,97 +1,162 @@
-import { CalendarDays } from "lucide-react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 
-const visitors = [
-  {
-    name: "Alice Johnson",
-    sex: "Female",
-    entry: "11:05 AM",
-    exit: "--",
-    dwellTime: "--",
-    image: "https://i.pravatar.cc/100?img=47",
-  },
-  {
-    name: "Brian Smith",
-    sex: "Male",
-    entry: "11:03 AM",
-    exit: "--",
-    dwellTime: "--",
-    image: "https://i.pravatar.cc/100?img=12",
-  },
-  {
-    name: "Catherine Lee",
-    sex: "Female",
-    entry: "11:00 AM",
-    exit: "--",
-    dwellTime: "--",
-    image: "https://i.pravatar.cc/100?img=32",
-  },
-  {
-    name: "David Brown",
-    sex: "Male",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=11",
-  },
-  {
-    name: "Eva White",
-    sex: "Female",
-    entry: "11:20 AM",
-    exit: "11:30 AM",
-    dwellTime: "00:10",
-    image: "https://i.pravatar.cc/100?img=44",
-  },
-  {
-    name: "Frank Green",
-    sex: "Male",
-    entry: "11:50 AM",
-    exit: "12:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=68",
-  },
-  {
-    name: "Grace Taylor",
-    sex: "Female",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=49",
-  },
-  {
-    name: "Henry Wilson",
-    sex: "Male",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=14",
-  },
-  {
-    name: "Isabella Martinez",
-    sex: "Female",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=25",
-  },
-  {
-    name: "Jack Thompson",
-    sex: "Male",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=15",
-  },
-  {
-    name: "Katherine Anderson",
-    sex: "Female",
-    entry: "10:50 AM",
-    exit: "11:10 AM",
-    dwellTime: "00:20",
-    image: "https://i.pravatar.cc/100?img=45",
-  },
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  User,
+} from "lucide-react";
+
+import {
+  getEntryExit,
+  getTodayRange,
+  getDayRange,
+} from "../api/api";
+
+import { useSite } from "../context/SiteContext";
+
+
+// ------------------------------------
+// DATE RANGE OPTIONS
+// ------------------------------------
+
+const dateOptions = [
+  { label: "Today", days: 0 },
+  { label: "Yesterday", days: 1 },
+  { label: "Last 7 Days", days: 7 },
+  { label: "Last 30 Days", days: 30 },
 ];
 
-export default function Visitors() {
+const PAGE_SIZE = 10;
+
+
+export default function CrowdEntries() {
+
+  const { selectedSite } = useSite();
+
+  const [dateRange, setDateRange] = useState(dateOptions[0]);
+  const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
+
+  // API data
+  const [records, setRecords] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+
+  // States
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+
+  // Build time range
+  const getTimeRange = useCallback(() => {
+    if (dateRange.days === 0) {
+      return getTodayRange();
+    }
+    if (dateRange.days === 1) {
+      return getDayRange(1);
+    }
+    const now = new Date();
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - dateRange.days);
+    start.setUTCHours(0, 0, 0, 0);
+    return { fromUtc: start.getTime(), toUtc: now.getTime() };
+  }, [dateRange]);
+
+
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    if (!selectedSite) return;
+
+    const siteId = selectedSite.siteId;
+    const { fromUtc, toUtc } = getTimeRange();
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await getEntryExit({
+        siteId,
+        fromUtc,
+        toUtc,
+        pageSize: PAGE_SIZE,
+        pageNumber,
+      });
+
+      setRecords(res?.records || []);
+      setTotalRecords(res?.totalRecords || 0);
+      setTotalPages(res?.totalPages || 0);
+    } catch (err) {
+      console.error("Entry-exit fetch error:", err);
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to load crowd entries"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedSite, getTimeRange, pageNumber]);
+
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+
+  // Reset to page 1 when date range or site changes
+  useEffect(() => {
+    setPageNumber(1);
+  }, [dateRange, selectedSite]);
+
+
+  // Format epoch millis to readable time
+  function formatTime(epochMs) {
+    if (!epochMs) return "--";
+    const d = new Date(epochMs);
+    return d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // Format dwell minutes
+  function formatDwell(mins) {
+    if (mins == null) return "--";
+    const m = Math.floor(mins);
+    const s = Math.round((mins - m) * 60);
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  // Generate page numbers for pagination
+  function getPageNumbers() {
+    const pages = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (pageNumber > 3) pages.push("...");
+
+      const start = Math.max(2, pageNumber - 1);
+      const end = Math.min(totalPages - 1, pageNumber + 1);
+      for (let i = start; i <= end; i++) pages.push(i);
+
+      if (pageNumber < totalPages - 2) pages.push("...");
+      pages.push(totalPages);
+    }
+    return pages;
+  }
+
+
   return (
     <div className="w-full min-h-full bg-[#f7f8fa] p-6 lg:p-7">
 
@@ -101,35 +166,122 @@ export default function Visitors() {
 
       <div className="flex items-center justify-between mb-6">
 
-        <h1 className="text-xl font-semibold text-gray-800">
-          Overview
-        </h1>
+        <div>
+          <h1 className="text-xl font-semibold text-gray-800">
+            Crowd Entries
+          </h1>
 
-        <button
-          className="
-            h-10
-            px-4
-            bg-white
-            border
-            border-gray-200
-            rounded-md
-            flex
-            items-center
-            gap-2
-            text-sm
-            text-gray-600
-            hover:bg-gray-50
-            transition
-          "
-        >
-          <CalendarDays size={16} />
+          {!loading && (
+            <p className="text-xs text-gray-400 mt-1">
+              {totalRecords.toLocaleString()} total records
+              {selectedSite && ` — ${selectedSite.name}`}
+            </p>
+          )}
+        </div>
 
-          <span>
-            Today
-          </span>
-        </button>
+        {/* Date Range Picker */}
+        <div className="relative">
+
+          <button
+            onClick={() =>
+              setDateDropdownOpen((prev) => !prev)
+            }
+            className="
+              h-10
+              px-4
+              bg-white
+              border
+              border-gray-200
+              rounded-md
+              flex
+              items-center
+              gap-2
+              text-sm
+              text-gray-600
+              hover:bg-gray-50
+              transition
+            "
+          >
+            <CalendarDays size={16} />
+
+            <span>
+              {dateRange.label}
+            </span>
+
+            <ChevronDown
+              size={14}
+              className={`transition-transform ${
+                dateDropdownOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+
+          {dateDropdownOpen && (
+            <div
+              className="
+                absolute
+                right-0
+                top-full
+                mt-1
+                min-w-[160px]
+                rounded-md
+                border
+                border-gray-200
+                bg-white
+                shadow-lg
+                py-1
+                z-50
+              "
+            >
+              {dateOptions.map((opt) => (
+                <button
+                  key={opt.label}
+                  onClick={() => {
+                    setDateRange(opt);
+                    setDateDropdownOpen(false);
+                  }}
+                  className={`
+                    w-full
+                    px-4
+                    py-2
+                    text-left
+                    text-sm
+                    transition
+                    ${
+                      dateRange.label === opt.label
+                        ? "bg-[#e8f5f4] text-[#039a94] font-medium"
+                        : "text-gray-700 hover:bg-gray-50"
+                    }
+                  `}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+        </div>
 
       </div>
+
+
+      {/* ERROR */}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-red-600 text-sm">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={fetchData}
+            className="flex items-center gap-1 text-xs text-red-600 hover:text-red-800 transition"
+          >
+            <RefreshCw size={13} />
+            Retry
+          </button>
+        </div>
+      )}
 
 
       {/* =========================================
@@ -160,7 +312,7 @@ export default function Visitors() {
               </th>
 
               <th className="px-5 py-3 text-left text-xs font-semibold text-gray-700">
-                Sex
+                Zone
               </th>
 
               <th className="px-5 py-3 text-left text-xs font-semibold text-gray-700">
@@ -175,6 +327,10 @@ export default function Visitors() {
                 Dwell Time
               </th>
 
+              <th className="px-5 py-3 text-left text-xs font-semibold text-gray-700">
+                Severity
+              </th>
+
             </tr>
 
           </thead>
@@ -184,83 +340,122 @@ export default function Visitors() {
 
           <tbody>
 
-            {visitors.map((visitor) => (
-
-              <tr
-                key={visitor.name}
-                className="
-                  border-t
-                  border-gray-100
-                  hover:bg-gray-50
-                  transition
-                "
-              >
-
-                {/* NAME */}
-
-                <td className="px-5 py-3">
-
-                  <div className="flex items-center gap-3">
-
-                    <img
-                      src={visitor.image}
-                      alt={visitor.name}
-                      className="
-                        w-8
-                        h-8
-                        rounded-full
-                        object-cover
-                        shrink-0
-                      "
-                    />
-
-                    <span className="text-sm text-gray-700">
-                      {visitor.name}
-                    </span>
-
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-5 py-16 text-center"
+                >
+                  <div className="flex items-center justify-center gap-2 text-gray-400">
+                    <Loader2 size={20} className="animate-spin" />
+                    <span className="text-sm">Loading entries...</span>
                   </div>
-
                 </td>
-
-
-                {/* SEX */}
-
-                <td className="px-5 py-3">
-                  <span className="text-sm text-gray-500">
-                    {visitor.sex}
-                  </span>
-                </td>
-
-
-                {/* ENTRY */}
-
-                <td className="px-5 py-3">
-                  <span className="text-sm text-gray-500">
-                    {visitor.entry}
-                  </span>
-                </td>
-
-
-                {/* EXIT */}
-
-                <td className="px-5 py-3">
-                  <span className="text-sm text-gray-500">
-                    {visitor.exit}
-                  </span>
-                </td>
-
-
-                {/* DWELL TIME */}
-
-                <td className="px-5 py-3">
-                  <span className="text-sm text-gray-500">
-                    {visitor.dwellTime}
-                  </span>
-                </td>
-
               </tr>
+            ) : records.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-5 py-16 text-center text-gray-400 text-sm"
+                >
+                  No entries found for this period
+                </td>
+              </tr>
+            ) : (
+              records.map((record, idx) => (
 
-            ))}
+                <tr
+                  key={`${record.personId}-${record.entryUtc}-${idx}`}
+                  className="
+                    border-t
+                    border-gray-100
+                    hover:bg-gray-50
+                    transition
+                  "
+                >
+
+                  {/* NAME */}
+
+                  <td className="px-5 py-3">
+
+                    <div className="flex items-center gap-3">
+
+                      <div
+                        className="
+                          w-8
+                          h-8
+                          rounded-full
+                          bg-[#e8f5f4]
+                          flex
+                          items-center
+                          justify-center
+                          shrink-0
+                        "
+                      >
+                        <User
+                          size={16}
+                          strokeWidth={1.8}
+                          className="text-[#45b8b3]"
+                        />
+                      </div>
+
+                      <span className="text-sm text-gray-700">
+                        {record.personName || record.personId || "Unknown"}
+                      </span>
+
+                    </div>
+
+                  </td>
+
+
+                  {/* ZONE */}
+
+                  <td className="px-5 py-3">
+                    <span className="text-sm text-gray-500">
+                      {record.zoneName || record.zoneId || "--"}
+                    </span>
+                  </td>
+
+
+                  {/* ENTRY */}
+
+                  <td className="px-5 py-3">
+                    <span className="text-sm text-gray-500">
+                      {record.entryLocal || formatTime(record.entryUtc)}
+                    </span>
+                  </td>
+
+
+                  {/* EXIT */}
+
+                  <td className="px-5 py-3">
+                    <span className="text-sm text-gray-500">
+                      {record.exitUtc
+                        ? (record.exitLocal || formatTime(record.exitUtc))
+                        : "--"}
+                    </span>
+                  </td>
+
+
+                  {/* DWELL TIME */}
+
+                  <td className="px-5 py-3">
+                    <span className="text-sm text-gray-500">
+                      {formatDwell(record.dwellMinutes)}
+                    </span>
+                  </td>
+
+
+                  {/* SEVERITY */}
+
+                  <td className="px-5 py-3">
+                    <SeverityBadge severity={record.severity} />
+                  </td>
+
+                </tr>
+
+              ))
+            )}
 
           </tbody>
 
@@ -273,93 +468,156 @@ export default function Visitors() {
           PAGINATION
       ========================================= */}
 
-      <div className="flex items-center justify-center gap-6 mt-5">
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 mt-5">
 
-        {/* Previous */}
-
-        <button
-          className="
-            text-gray-400
-            hover:text-gray-700
-            transition
-            text-sm
-          "
-        >
-          ‹
-        </button>
-
-
-        {/* Page 1 */}
-
-        <button
-          className="
-            relative
-            px-2
-            py-1
-            text-sm
-            font-medium
-            text-gray-700
-          "
-        >
-          1
-
-          <span
+          {/* Previous */}
+          <button
+            disabled={pageNumber <= 1}
+            onClick={() =>
+              setPageNumber((p) => Math.max(1, p - 1))
+            }
             className="
-              absolute
-              left-1/2
-              -translate-x-1/2
-              bottom-0
-              w-5
-              h-0.5
-              rounded-full
-              bg-[#45b8b3]
+              w-8
+              h-8
+              flex
+              items-center
+              justify-center
+              rounded
+              text-gray-500
+              hover:bg-gray-100
+              disabled:opacity-30
+              disabled:cursor-not-allowed
+              transition
             "
-          />
-        </button>
+          >
+            <ChevronLeft size={16} />
+          </button>
 
 
-        {/* More */}
+          {/* Page numbers */}
 
-        <button
-          className="
-            w-7
-            h-7
-            flex
-            items-center
-            justify-center
-            border
-            border-gray-200
-            rounded
-            text-xs
-            text-gray-500
-          "
-        >
-          ...
-        </button>
+          {getPageNumbers().map((p, i) =>
+            p === "..." ? (
+              <span
+                key={`dots-${i}`}
+                className="
+                  w-8
+                  h-8
+                  flex
+                  items-center
+                  justify-center
+                  text-xs
+                  text-gray-400
+                "
+              >
+                ...
+              </span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => setPageNumber(p)}
+                className={`
+                  relative
+                  w-8
+                  h-8
+                  flex
+                  items-center
+                  justify-center
+                  rounded
+                  text-sm
+                  transition
+                  ${
+                    pageNumber === p
+                      ? "font-medium text-gray-700"
+                      : "text-gray-500 hover:bg-gray-100"
+                  }
+                `}
+              >
+                {p}
+
+                {pageNumber === p && (
+                  <span
+                    className="
+                      absolute
+                      bottom-0
+                      left-1/2
+                      -translate-x-1/2
+                      w-5
+                      h-0.5
+                      rounded-full
+                      bg-[#45b8b3]
+                    "
+                  />
+                )}
+              </button>
+            )
+          )}
 
 
-        {/* Page 5 */}
+          {/* Next */}
+          <button
+            disabled={pageNumber >= totalPages}
+            onClick={() =>
+              setPageNumber((p) =>
+                Math.min(totalPages, p + 1)
+              )
+            }
+            className="
+              w-8
+              h-8
+              flex
+              items-center
+              justify-center
+              rounded
+              text-gray-500
+              hover:bg-gray-100
+              disabled:opacity-30
+              disabled:cursor-not-allowed
+              transition
+            "
+          >
+            <ChevronRight size={16} />
+          </button>
 
-        <button className="text-sm text-gray-500">
-          5
-        </button>
-
-
-        {/* Next */}
-
-        <button
-          className="
-            text-gray-400
-            hover:text-gray-700
-            transition
-            text-sm
-          "
-        >
-          ›
-        </button>
-
-      </div>
+        </div>
+      )}
 
     </div>
+  );
+}
+
+
+// ------------------------------------
+// SEVERITY BADGE
+// ------------------------------------
+
+function SeverityBadge({ severity }) {
+  if (!severity) return <span className="text-sm text-gray-400">--</span>;
+
+  const styles = {
+    high: "bg-red-600 text-white",
+    medium: "bg-orange-400 text-white",
+    low: "bg-emerald-500 text-white",
+  };
+
+  const s = severity.toLowerCase();
+  const cls = styles[s] || styles.low;
+
+  return (
+    <span
+      className={`
+        inline-block
+        rounded-sm
+        px-2
+        py-1
+        text-[10px]
+        font-medium
+        capitalize
+        ${cls}
+      `}
+    >
+      {severity}
+    </span>
   );
 }
