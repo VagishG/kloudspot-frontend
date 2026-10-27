@@ -1,14 +1,16 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   MapPin,
   ChevronDown,
   Bell,
+  Menu,
 } from "lucide-react";
 
 import NotificationPanel from "./NotificationPanel";
 import { useSite } from "../context/SiteContext";
+import { useSocket } from "../context/SocketContext";
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }) {
 
   const [notificationsOpen, setNotificationsOpen] =
     useState(false);
@@ -24,6 +26,8 @@ export default function Topbar() {
     selectSite,
     loading: sitesLoading,
   } = useSite();
+
+  const { alerts } = useSocket();
 
 
   // Close dropdown when clicking outside
@@ -56,7 +60,9 @@ export default function Topbar() {
           flex
           items-center
           justify-between
-          px-5
+          gap-2
+          px-3
+          sm:px-5
         "
       >
 
@@ -64,24 +70,47 @@ export default function Topbar() {
             LEFT
         ===================================== */}
 
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+
+          {/* Mobile menu */}
+
+          <button
+            type="button"
+            onClick={onMenuClick}
+            aria-label="Open navigation"
+            className="
+              flex
+              h-8
+              w-8
+              shrink-0
+              items-center
+              justify-center
+              rounded-md
+              text-gray-600
+              hover:bg-gray-100
+              lg:hidden
+            "
+          >
+            <Menu size={20} />
+          </button>
+
 
           {/* Brand */}
 
-          <div className="text-sm font-medium text-gray-900 whitespace-nowrap">
+          <div className="hidden text-sm font-medium text-gray-900 whitespace-nowrap sm:block">
             Crowd Solutions
           </div>
 
 
           {/* Divider */}
 
-          <div className="h-5 w-px bg-gray-300" />
+          <div className="hidden h-5 w-px bg-gray-300 sm:block" />
 
 
           {/* Location Picker */}
 
           <div
-            className="relative"
+            className="relative min-w-0"
             ref={dropdownRef}
           >
 
@@ -91,6 +120,7 @@ export default function Topbar() {
               }
               className="
                 h-8
+                max-w-[46vw]
                 px-3
                 flex
                 items-center
@@ -103,6 +133,7 @@ export default function Topbar() {
                 text-gray-700
                 hover:bg-gray-50
                 transition
+                sm:max-w-none
               "
             >
 
@@ -111,7 +142,7 @@ export default function Topbar() {
                 strokeWidth={2}
               />
 
-              <span>
+              <span className="truncate">
                 {sitesLoading
                   ? "Loading..."
                   : selectedSite?.name || "Select Site"}
@@ -198,11 +229,11 @@ export default function Topbar() {
             RIGHT
         ===================================== */}
 
-        <div className="flex items-center gap-5">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-5">
 
           {/* Language */}
 
-          <div className="flex items-center gap-1">
+          <div className="hidden items-center gap-1 sm:flex">
 
             <button
               className="
@@ -245,6 +276,7 @@ export default function Topbar() {
                 (previous) => !previous
               )
             }
+            aria-label="Open alerts"
             className="
               relative
               flex
@@ -252,8 +284,8 @@ export default function Topbar() {
               justify-center
               text-gray-600
               hover:text-gray-900
-                cursor-pointer
-              "
+              cursor-pointer
+            "
           >
 
             <Bell
@@ -263,19 +295,21 @@ export default function Topbar() {
 
             {/* Notification dot */}
 
-            <span
-              className="
-                absolute
-                -top-1
-                -right-1
-                h-2
-                w-2
-                rounded-full
-                bg-red-400
-                border
-                border-white
-              "
-            />
+            {alerts.length > 0 && (
+              <span
+                className="
+                  absolute
+                  -top-1
+                  -right-1
+                  h-2
+                  w-2
+                  rounded-full
+                  bg-red-400
+                  border
+                  border-white
+                "
+              />
+            )}
 
           </button>
 
@@ -283,9 +317,11 @@ export default function Topbar() {
           {/* Profile */}
 
           <button
+            aria-label="Open profile"
             className="
               w-8
               h-8
+              shrink-0
               rounded-full
               overflow-hidden
               border

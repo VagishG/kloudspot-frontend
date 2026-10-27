@@ -1,4 +1,3 @@
-import React from "react";
 import {
   NavLink,
   useNavigate,
@@ -10,6 +9,7 @@ import {
   SquareArrowDownRight,
   Power,
 } from "lucide-react";
+import { clearCache } from "../utils/dataCache";
 
 
 const items = [
@@ -30,6 +30,7 @@ const items = [
 export default function Sidebar({
   collapsed = false,
   onToggle,
+  onNavigate,
 }) {
 
   const navigate = useNavigate();
@@ -40,8 +41,11 @@ export default function Sidebar({
   // ================================
 
   function handleLogout() {
-    // Remove authentication token
+    // Remove authentication token and cached tenant data
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("selectedSiteId");
+    clearCache();
 
     // Redirect to login
     navigate("/login", {
@@ -125,6 +129,7 @@ export default function Sidebar({
           <NavTab
             key={item.nav}
             collapsed={collapsed}
+            onNavigate={onNavigate}
             {...item}
           />
         ))}
@@ -196,6 +201,7 @@ function NavTab({
   text,
   nav,
   collapsed,
+  onNavigate,
   end = false,
 }) {
 
@@ -203,6 +209,7 @@ function NavTab({
     <NavLink
       to={nav}
       end={end}
+      onClick={onNavigate}
       title={
         collapsed
           ? text

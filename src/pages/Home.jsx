@@ -1,7 +1,8 @@
-import React, {
+import {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from "react";
 
 import {
@@ -32,11 +33,19 @@ import {
   getDwell,
   getOccupancy,
   getDemographics,
-  getTodayRange,
-  getDayRange,
 } from "../api/api";
 
 import { useSite } from "../context/SiteContext";
+import { useSocket } from "../context/SocketContext";
+import {
+  getRangeForDays,
+  getComparisonRange,
+  percentChange,
+  comparisonLabel,
+  formatComparison,
+  getSiteDateKey,
+} from "../utils/dateRange";
+import { readCache, writeCache } from "../utils/dataCache";
 
 
 // ------------------------------------
@@ -63,7 +72,7 @@ const StatCard = ({
   loading = false,
 }) => {
   return (
-    <div className="flex-1 bg-white rounded-lg p-5 border border-gray-100">
+    <div className="min-w-0 flex-1 rounded-lg border border-gray-100 bg-white p-4 sm:p-5">
 
       <p className="text-sm font-medium text-gray-600">
         {title}
@@ -83,12 +92,19 @@ const StatCard = ({
           {change && (
             <p
               className={`mt-2 text-xs ${
-                positive
-                  ? "text-emerald-500"
-                  : "text-red-400"
+                change.startsWith("Same")
+                  ? "text-gray-400"
+                  : positive
+                    ? "text-emerald-500"
+                    : "text-red-400"
               }`}
             >
-              {positive ? "↗" : "↘"} {change}
+              {change.startsWith("Same")
+                ? "•"
+                : positive
+                  ? "↗"
+                  : "↘"}{" "}
+              {change}
             </p>
           )}
         </>
@@ -105,9 +121,9 @@ const StatCard = ({
 
 const OccupancyChart = ({ data, loading }) => {
   return (
-    <div className="bg-white rounded-lg border border-gray-100 p-5">
+    <div className="min-w-0 rounded-lg border border-gray-100 bg-white p-4 sm:p-5">
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
 
         <h3 className="text-sm font-medium text-gray-800">
           Overall Occupancy
@@ -120,7 +136,7 @@ const OccupancyChart = ({ data, loading }) => {
 
       </div>
 
-      <div className="h-[280px]">
+      <div className="h-[240px] sm:h-[280px]">
 
         {loading ? (
           <div className="h-full flex items-center justify-center text-gray-400">
@@ -241,7 +257,7 @@ const DemographicDonut = ({ maleTotal, femaleTotal, loading }) => {
   ];
 
   return (
-    <div className="bg-white rounded-lg border border-gray-100 p-5 h-full">
+    <div className="h-full min-w-0 rounded-lg border border-gray-100 bg-white p-4 sm:p-5">
 
       <h3 className="text-sm font-medium text-gray-800">
         Chart of Demographics
@@ -343,7 +359,7 @@ const DemographicDonut = ({ maleTotal, femaleTotal, loading }) => {
 const DemographicAnalysis = ({ data, loading }) => {
 
   return (
-    <div className="flex-1 bg-white rounded-lg border border-gray-100 p-5">
+    <div className="min-w-0 flex-1 rounded-lg border border-gray-100 bg-white p-4 sm:p-5">
 
       <div className="flex items-center justify-between mb-3">
 
@@ -367,7 +383,7 @@ const DemographicAnalysis = ({ data, loading }) => {
 
       </div>
 
-      <div className="h-[260px]">
+      <div className="h-[220px] sm:h-[260px]">
 
         {loading ? (
           <div className="h-full flex items-center justify-center text-gray-400">
@@ -486,12 +502,66 @@ const ErrorBanner = ({ message, onRetry }) => (
 
 
 // ------------------------------------
+// NORMALIZERS
+// ------------------------------------
+
+function normalizeOccupancyBuckets(response) {
+  const buckets = Array.isArray(response)
+    ? response
+    : response?.buckets || response?.data || [];
+
+  return buckets.map((bucket) => ({
+    hour: bucket.hour ?? bucket.label ?? bucket.time ?? "",
+    avgOccupancy: bucket.avgOccupancy ?? bucket.count ?? bucket.value ?? 0,
+  }));
+}
+
+function normalizeDemographicBuckets(response) {
+  const buckets = Array.isArray(response)
+    ? response
+    : response?.buckets || response?.data || [];
+
+  let maleTotal = 0;
+  let femaleTotal = 0;
+
+  const data = buckets.map((bucket) => {
+    const male = bucket.male ?? bucket.maleCount ?? 0;
+    const female = bucket.female ?? bucket.femaleCount ?? 0;
+    maleTotal += male;
+    femaleTotal += female;
+
+    return {
+      hour: bucket.hour ?? bucket.label ?? bucket.time ?? "",
+      male,
+      female,
+    };
+  });
+
+  return { data, maleTotal, femaleTotal };
+}
+
+function previousLiveOccupancy(currentBuckets, previousBuckets) {
+  if (currentBuckets.length === 0 || previousBuckets.length === 0) {
+    return null;
+  }
+
+  const latest = currentBuckets[currentBuckets.length - 1];
+  const match =
+    previousBuckets.find((bucket) => bucket.hour === latest.hour) ||
+    previousBuckets[previousBuckets.length - 1];
+
+  return match?.avgOccupancy ?? null;
+}
+
+
+// ------------------------------------
 // MAIN OVERVIEW
 // ------------------------------------
 
 const Home = () => {
 
   const { selectedSite } = useSite();
+  const { liveOccupancy: socketOccupancy } = useSocket();
 
   const [dateRange, setDateRange] = useState(dateOptions[0]);
   const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
@@ -503,6 +573,11 @@ const Home = () => {
   const [demographicData, setDemographicData] = useState([]);
   const [maleTotal, setMaleTotal] = useState(0);
   const [femaleTotal, setFemaleTotal] = useState(0);
+  const [comparisons, setComparisons] = useState({
+    footfall: null,
+    dwell: null,
+    occupancy: null,
+  });
 
   // Loading / error states
   const [statsLoading, setStatsLoading] = useState(true);
@@ -510,107 +585,196 @@ const Home = () => {
   const [demoLoading, setDemoLoading] = useState(true);
   const [error, setError] = useState(null);
 
-
-  // Build time range based on selection
-  const getTimeRange = useCallback(() => {
-    if (dateRange.days === 0) {
-      return getTodayRange();
-    }
-    if (dateRange.days === 1) {
-      return getDayRange(1);
-    }
-    // Multi-day range
-    const now = new Date();
-    const start = new Date(now);
-    start.setUTCDate(start.getUTCDate() - dateRange.days);
-    start.setUTCHours(0, 0, 0, 0);
-    return { fromUtc: start.getTime(), toUtc: now.getTime() };
-  }, [dateRange]);
+  const requestIdRef = useRef(0);
 
 
-  // Fetch all analytics data
+  // Fetch all analytics data in parallel
   const fetchData = useCallback(async () => {
     if (!selectedSite) return;
 
     const siteId = selectedSite.siteId;
-    const { fromUtc, toUtc } = getTimeRange();
+    const timezone = selectedSite.timezone;
+    const now = new Date();
+    const currentRange = getRangeForDays(
+      dateRange.days,
+      timezone,
+      now
+    );
+    const previousRange = getComparisonRange(
+      dateRange.days,
+      timezone,
+      now
+    );
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    const cacheKey = `dashboard:${siteId}:${dateRange.days}:${getSiteDateKey(
+      timezone,
+      now
+    )}`;
+    const cached = readCache(cacheKey);
+    const cachedData = cached?.data || null;
 
     setError(null);
-    setStatsLoading(true);
-    setOccupancyLoading(true);
-    setDemoLoading(true);
 
-    // Fetch stat cards (footfall + dwell) in parallel
-    try {
-      const [footfallRes, dwellRes] = await Promise.allSettled([
-        getFootfall({ siteId, fromUtc, toUtc }),
-        getDwell({ siteId, fromUtc, toUtc }),
-      ]);
-
-      if (footfallRes.status === "fulfilled") {
-        setFootfall(footfallRes.value);
-      }
-      if (dwellRes.status === "fulfilled") {
-        setDwell(dwellRes.value);
-      }
-    } catch (err) {
-      console.error("Stats fetch error:", err);
-      setError("Failed to load statistics");
-    } finally {
+    if (cachedData) {
+      setFootfall(cachedData.footfall ?? null);
+      setDwell(cachedData.dwell ?? null);
+      setOccupancyData(cachedData.occupancy ?? []);
+      setDemographicData(cachedData.demographics?.data ?? []);
+      setMaleTotal(cachedData.demographics?.maleTotal ?? 0);
+      setFemaleTotal(cachedData.demographics?.femaleTotal ?? 0);
+      setComparisons(
+        cachedData.comparisons ?? {
+          footfall: null,
+          dwell: null,
+          occupancy: null,
+        }
+      );
       setStatsLoading(false);
-    }
-
-    // Fetch occupancy chart
-    try {
-      const occRes = await getOccupancy({ siteId, fromUtc, toUtc });
-      // Normalize — API may return { buckets: [...] } or an array directly
-      const buckets = Array.isArray(occRes)
-        ? occRes
-        : occRes?.buckets || occRes?.data || [];
-
-      const formatted = buckets.map((b) => ({
-        hour: b.hour ?? b.label ?? b.time ?? "",
-        avgOccupancy: b.avgOccupancy ?? b.count ?? b.value ?? 0,
-      }));
-
-      setOccupancyData(formatted);
-    } catch (err) {
-      console.error("Occupancy fetch error:", err);
-    } finally {
       setOccupancyLoading(false);
-    }
-
-    // Fetch demographics chart
-    try {
-      const demoRes = await getDemographics({ siteId, fromUtc, toUtc });
-      const buckets = Array.isArray(demoRes)
-        ? demoRes
-        : demoRes?.buckets || demoRes?.data || [];
-
-      let mTotal = 0;
-      let fTotal = 0;
-
-      const formatted = buckets.map((b) => {
-        const male = b.male ?? b.maleCount ?? 0;
-        const female = b.female ?? b.femaleCount ?? 0;
-        mTotal += male;
-        fTotal += female;
-        return {
-          hour: b.hour ?? b.label ?? b.time ?? "",
-          male,
-          female,
-        };
-      });
-
-      setDemographicData(formatted);
-      setMaleTotal(mTotal);
-      setFemaleTotal(fTotal);
-    } catch (err) {
-      console.error("Demographics fetch error:", err);
-    } finally {
       setDemoLoading(false);
+    } else {
+      setStatsLoading(true);
+      setOccupancyLoading(true);
+      setDemoLoading(true);
     }
-  }, [selectedSite, getTimeRange]);
+
+    const [
+      footfallRes,
+      dwellRes,
+      occupancyRes,
+      demographicsRes,
+      previousFootfallRes,
+      previousDwellRes,
+      previousOccupancyRes,
+    ] = await Promise.allSettled([
+      getFootfall({ siteId, ...currentRange }),
+      getDwell({ siteId, ...currentRange }),
+      getOccupancy({ siteId, ...currentRange }),
+      getDemographics({ siteId, ...currentRange }),
+      getFootfall({ siteId, ...previousRange }),
+      getDwell({ siteId, ...previousRange }),
+      getOccupancy({ siteId, ...previousRange }),
+    ]);
+
+    if (requestId !== requestIdRef.current) return;
+
+    const currentResults = [
+      footfallRes,
+      dwellRes,
+      occupancyRes,
+      demographicsRes,
+    ];
+
+    const allCurrentFailed = currentResults.every(
+      (result) => result.status === "rejected"
+    );
+
+    if (allCurrentFailed) {
+      if (!cachedData) {
+        setFootfall(null);
+        setDwell(null);
+        setOccupancyData([]);
+        setDemographicData([]);
+        setMaleTotal(0);
+        setFemaleTotal(0);
+        setComparisons({
+          footfall: null,
+          dwell: null,
+          occupancy: null,
+        });
+        setError("Failed to load dashboard data");
+      }
+      setStatsLoading(false);
+      setOccupancyLoading(false);
+      setDemoLoading(false);
+      return;
+    }
+
+    const footfallValue =
+      footfallRes.status === "fulfilled"
+        ? footfallRes.value
+        : cachedData?.footfall ?? null;
+    const dwellValue =
+      dwellRes.status === "fulfilled"
+        ? dwellRes.value
+        : cachedData?.dwell ?? null;
+
+    const occupancy =
+      occupancyRes.status === "fulfilled"
+        ? normalizeOccupancyBuckets(occupancyRes.value)
+        : cachedData?.occupancy ?? [];
+    const demographics =
+      demographicsRes.status === "fulfilled"
+        ? normalizeDemographicBuckets(demographicsRes.value)
+        : cachedData?.demographics ?? {
+            data: [],
+            maleTotal: 0,
+            femaleTotal: 0,
+          };
+    const previousOccupancy = normalizeOccupancyBuckets(
+      previousOccupancyRes.status === "fulfilled"
+        ? previousOccupancyRes.value
+        : []
+    );
+
+    const previousFootfall =
+      previousFootfallRes.status === "fulfilled"
+        ? previousFootfallRes.value?.footfall
+        : null;
+    const previousDwell =
+      previousDwellRes.status === "fulfilled"
+        ? previousDwellRes.value?.avgDwellMinutes
+        : null;
+    const currentLiveOccupancy =
+      occupancy.length > 0
+        ? occupancy[occupancy.length - 1].avgOccupancy
+        : null;
+
+    const comparisons = {
+      footfall:
+        footfallRes.status === "fulfilled" &&
+        previousFootfallRes.status === "fulfilled"
+          ? percentChange(footfallValue?.footfall, previousFootfall)
+          : cachedData?.comparisons?.footfall ?? null,
+      dwell:
+        dwellRes.status === "fulfilled" &&
+        previousDwellRes.status === "fulfilled"
+          ? percentChange(dwellValue?.avgDwellMinutes, previousDwell)
+          : cachedData?.comparisons?.dwell ?? null,
+      occupancy:
+        occupancyRes.status === "fulfilled" &&
+        previousOccupancyRes.status === "fulfilled"
+          ? percentChange(
+              currentLiveOccupancy,
+              previousLiveOccupancy(occupancy, previousOccupancy)
+            )
+          : cachedData?.comparisons?.occupancy ?? null,
+    };
+
+    const snapshot = {
+      footfall: footfallValue,
+      dwell: dwellValue,
+      occupancy,
+      demographics,
+      comparisons,
+    };
+
+    setFootfall(snapshot.footfall);
+    setDwell(snapshot.dwell);
+    setOccupancyData(snapshot.occupancy);
+    setDemographicData(snapshot.demographics.data);
+    setMaleTotal(snapshot.demographics.maleTotal);
+    setFemaleTotal(snapshot.demographics.femaleTotal);
+    setComparisons(snapshot.comparisons);
+    writeCache(cacheKey, snapshot);
+
+    setStatsLoading(false);
+    setOccupancyLoading(false);
+    setDemoLoading(false);
+  }, [selectedSite, dateRange]);
 
 
   useEffect(() => {
@@ -618,11 +782,27 @@ const Home = () => {
   }, [fetchData]);
 
 
-  // Compute live occupancy from the latest occupancy bucket
-  const liveOccupancy =
+  const bucketLiveOccupancy =
     occupancyData.length > 0
       ? occupancyData[occupancyData.length - 1].avgOccupancy
       : null;
+
+  const liveOccupancy =
+    socketOccupancy?.count ?? bucketLiveOccupancy;
+
+  const changeScope = comparisonLabel(dateRange.days);
+  const footfallComparison = formatComparison(
+    comparisons.footfall,
+    changeScope
+  );
+  const dwellComparison = formatComparison(
+    comparisons.dwell,
+    changeScope
+  );
+  const occupancyComparison = formatComparison(
+    comparisons.occupancy,
+    changeScope
+  );
 
   // Format dwell time
   const dwellDisplay = dwell?.avgDwellMinutes
@@ -635,22 +815,22 @@ const Home = () => {
 
 
   return (
-    <div className="min-h-full bg-[#f5f7f8] p-6 lg:p-7">
+    <div className="min-h-full bg-[#f5f7f8] p-4 sm:p-6 lg:p-7">
 
       {/* HEADER */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 
-        <h1 className="text-xl font-semibold text-gray-800">
+        <h1 className="min-w-0 truncate text-xl font-semibold text-gray-800">
           Overview
           {selectedSite && (
-            <span className="text-sm font-normal text-gray-400 ml-2">
+            <span className="ml-2 text-sm font-normal text-gray-400">
               — {selectedSite.name}
             </span>
           )}
         </h1>
 
         {/* Date Range Picker */}
-        <div className="relative">
+        <div className="relative shrink-0 self-start sm:self-auto">
 
           <button
             onClick={() =>
@@ -746,7 +926,7 @@ const Home = () => {
 
       {/* STAT CARDS */}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
 
         <StatCard
           title="Live Occupancy"
@@ -755,38 +935,32 @@ const Home = () => {
               ? liveOccupancy.toLocaleString()
               : "--"
           }
-          change={
-            footfall?.footfall != null
-              ? `Based on ${dateRange.label.toLowerCase()} data`
-              : null
-          }
-          loading={occupancyLoading}
+          change={occupancyComparison}
+          positive={(comparisons.occupancy ?? 0) >= 0}
+          loading={occupancyLoading && socketOccupancy?.count == null}
         />
 
         <StatCard
-          title="Today's Footfall"
+          title={
+            dateRange.days === 0
+              ? "Today's Footfall"
+              : "Footfall"
+          }
           value={
             footfall?.footfall != null
               ? footfall.footfall.toLocaleString()
               : "--"
           }
-          change={
-            footfall?.footfall != null
-              ? `Total entries for ${dateRange.label.toLowerCase()}`
-              : null
-          }
-          positive={true}
+          change={footfallComparison}
+          positive={(comparisons.footfall ?? 0) >= 0}
           loading={statsLoading}
         />
 
         <StatCard
           title="Avg Dwell Time"
           value={dwellDisplay}
-          change={
-            dwell?.dwellRecords
-              ? `Based on ${dwell.dwellRecords.toLocaleString()} records`
-              : null
-          }
+          change={dwellComparison}
+          positive={(comparisons.dwell ?? 0) >= 0}
           loading={statsLoading}
         />
 
@@ -805,11 +979,11 @@ const Home = () => {
 
       <div className="mt-6">
 
-        <h2 className="text-base font-medium text-gray-800 mb-3">
+        <h2 className="mb-3 text-base font-medium text-gray-800">
           Demographics
         </h2>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
 
           <DemographicDonut
             maleTotal={maleTotal}

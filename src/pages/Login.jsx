@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { login } from "../api/api.js";
@@ -35,8 +35,6 @@ export default function Login() {
         password,
       });
 
-      console.log("Login successful:", data);
-
       // If your backend returns a token:
       if (data?.token) {
         localStorage.setItem("token", data.token);
@@ -54,8 +52,6 @@ export default function Login() {
 
       navigate("/dashboard");
     } catch (err) {
-      console.error("Login failed:", err);
-
       setError(
         err?.message ||
           err?.errorMessage ||

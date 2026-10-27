@@ -1,42 +1,65 @@
-import React, {
+import {
   createContext,
   useContext,
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from "react";
 import { getSites } from "../api/api";
+import { readCache, writeCache } from "../utils/dataCache";
 
 const SiteContext = createContext(null);
 
 export function SiteProvider({ children }) {
-  const [sites, setSites] = useState([]);
-  const [selectedSite, setSelectedSite] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [initialCache] = useState(() => readCache("sites"));
+  const initialSites = Array.isArray(initialCache?.data)
+    ? initialCache.data
+    : [];
+  const savedId = localStorage.getItem("selectedSiteId");
+  const initialSelectedSite =
+    initialSites.find((site) => site.siteId === savedId) ||
+    initialSites[0] ||
+    null;
+
+  const [sites, setSites] = useState(initialSites);
+  const [selectedSite, setSelectedSite] = useState(initialSelectedSite);
+  const [loading, setLoading] = useState(initialSites.length === 0);
   const [error, setError] = useState(null);
+  const hasSitesRef = useRef(initialSites.length > 0);
 
   // Fetch all sites on mount
   const fetchSites = useCallback(async () => {
-    setLoading(true);
+    if (!hasSitesRef.current) setLoading(true);
     setError(null);
+
     try {
       const data = await getSites();
       const siteList = Array.isArray(data) ? data : [];
       setSites(siteList);
+      hasSitesRef.current = siteList.length > 0;
+      writeCache("sites", siteList, 24 * 60 * 60 * 1000);
 
       // Restore previously selected site or default to first
-      const savedId = localStorage.getItem("selectedSiteId");
-      const saved = siteList.find((s) => s.siteId === savedId);
+      const latestSavedId = localStorage.getItem("selectedSiteId");
+      const saved = siteList.find(
+        (site) => site.siteId === latestSavedId
+      );
 
-      if (saved) {
-        setSelectedSite(saved);
-      } else if (siteList.length > 0) {
-        setSelectedSite(siteList[0]);
-        localStorage.setItem("selectedSiteId", siteList[0].siteId);
-      }
+      setSelectedSite((current) => {
+        const currentMatch = siteList.find(
+          (site) => site.siteId === current?.siteId
+        );
+        const nextSite = saved || currentMatch || siteList[0] || null;
+        if (nextSite) {
+          localStorage.setItem("selectedSiteId", nextSite.siteId);
+        }
+        return nextSite;
+      });
     } catch (err) {
-      console.error("Failed to fetch sites:", err);
-      setError(err?.message || "Failed to load sites");
+      if (!hasSitesRef.current) {
+        setError(err?.message || "Failed to load sites");
+      }
     } finally {
       setLoading(false);
     }

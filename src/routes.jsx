@@ -1,19 +1,36 @@
-import { createBrowserRouter } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
-import Login from "./pages/Login";
-import DashboardLayout from "./pages/DashboardLayout";
-import Home from "./pages/Home";
-import CrowdEntries from "./pages/CrowdEntries";
 import ProtectedRoute from "./components/Protectedroutes";
 
+const Login = lazy(() => import("./pages/Login"));
+const DashboardLayout = lazy(() => import("./pages/DashboardLayout"));
+const Home = lazy(() => import("./pages/Home"));
+const CrowdEntries = lazy(() => import("./pages/CrowdEntries"));
+
+const RouteLoader = () => (
+  <div className="flex min-h-[40vh] items-center justify-center">
+    <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#45b8b3] border-t-transparent" />
+  </div>
+);
+
+const page = (element) => (
+  <Suspense fallback={<RouteLoader />}>{element}</Suspense>
+);
+
 const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <Navigate to="/login" replace />,
+  },
+
   /* =========================
      PUBLIC ROUTES
   ========================= */
 
   {
     path: "/login",
-    element: <Login />,
+    element: page(<Login />),
   },
 
 
@@ -26,19 +43,23 @@ const router = createBrowserRouter([
     children: [
       {
         path: "/dashboard",
-        element: <DashboardLayout />,
+        element: page(<DashboardLayout />),
         children: [
           {
             index: true,
-            element: <Home />,
+            element: page(<Home />),
           },
           {
             path: "crowdentries",
-            element: <CrowdEntries />,
+            element: page(<CrowdEntries />),
           },
         ],
       },
     ],
+  },
+  {
+    path: "*",
+    element: <Navigate to="/login" replace />,
   },
 ]);
 

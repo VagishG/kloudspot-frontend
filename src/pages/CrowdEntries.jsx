@@ -1,4 +1,4 @@
-import React, {
+import {
   useState,
   useEffect,
   useCallback,
@@ -15,13 +15,10 @@ import {
   User,
 } from "lucide-react";
 
-import {
-  getEntryExit,
-  getTodayRange,
-  getDayRange,
-} from "../api/api";
-
+import { getEntryExit } from "../api/api";
 import { useSite } from "../context/SiteContext";
+import { getRangeForDays, getSiteDateKey } from "../utils/dateRange";
+import { readCache, writeCache } from "../utils/dataCache";
 
 
 // ------------------------------------
@@ -56,20 +53,11 @@ export default function CrowdEntries() {
   const [error, setError] = useState(null);
 
 
-  // Build time range
-  const getTimeRange = useCallback(() => {
-    if (dateRange.days === 0) {
-      return getTodayRange();
-    }
-    if (dateRange.days === 1) {
-      return getDayRange(1);
-    }
-    const now = new Date();
-    const start = new Date(now);
-    start.setUTCDate(start.getUTCDate() - dateRange.days);
-    start.setUTCHours(0, 0, 0, 0);
-    return { fromUtc: start.getTime(), toUtc: now.getTime() };
-  }, [dateRange]);
+  // Build site-timezone aware time range
+  const getTimeRange = useCallback(
+    () => getRangeForDays(dateRange.days, selectedSite?.timezone),
+    [dateRange, selectedSite?.timezone]
+  );
 
 
   // Fetch data
@@ -78,9 +66,21 @@ export default function CrowdEntries() {
 
     const siteId = selectedSite.siteId;
     const { fromUtc, toUtc } = getTimeRange();
+    const cacheKey = `entries:${siteId}:${dateRange.days}:${pageNumber}:${getSiteDateKey(
+      selectedSite.timezone
+    )}`;
+    const cached = readCache(cacheKey, "session");
 
-    setLoading(true);
     setError(null);
+
+    if (cached?.data) {
+      setRecords(cached.data.records || []);
+      setTotalRecords(cached.data.totalRecords || 0);
+      setTotalPages(cached.data.totalPages || 0);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
 
     try {
       const res = await getEntryExit({
@@ -91,20 +91,31 @@ export default function CrowdEntries() {
         pageNumber,
       });
 
-      setRecords(res?.records || []);
-      setTotalRecords(res?.totalRecords || 0);
-      setTotalPages(res?.totalPages || 0);
+      const snapshot = {
+        records: res?.records || [],
+        totalRecords: res?.totalRecords || 0,
+        totalPages: res?.totalPages || 0,
+      };
+
+      setRecords(snapshot.records);
+      setTotalRecords(snapshot.totalRecords);
+      setTotalPages(snapshot.totalPages);
+      writeCache(cacheKey, snapshot, 2 * 60 * 1000, "session");
     } catch (err) {
-      console.error("Entry-exit fetch error:", err);
-      setError(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Failed to load crowd entries"
-      );
+      if (!cached?.data) {
+        setRecords([]);
+        setTotalRecords(0);
+        setTotalPages(0);
+        setError(
+          err?.response?.data?.message ||
+            err?.message ||
+            "Failed to load crowd entries"
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [selectedSite, getTimeRange, pageNumber]);
+  }, [selectedSite, getTimeRange, pageNumber, dateRange.days]);
 
 
   useEffect(() => {
@@ -112,10 +123,10 @@ export default function CrowdEntries() {
   }, [fetchData]);
 
 
-  // Reset to page 1 when date range or site changes
+  // Reset to page 1 when the site changes
   useEffect(() => {
     setPageNumber(1);
-  }, [dateRange, selectedSite]);
+  }, [selectedSite?.siteId]);
 
 
   // Format epoch millis to readable time
@@ -164,9 +175,9 @@ export default function CrowdEntries() {
           HEADER
       ========================================= */}
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold text-gray-800">
             Crowd Entries
           </h1>
@@ -180,7 +191,7 @@ export default function CrowdEntries() {
         </div>
 
         {/* Date Range Picker */}
-        <div className="relative">
+        <div className="relative shrink-0 self-start sm:self-auto">
 
           <button
             onClick={() =>
@@ -238,6 +249,7 @@ export default function CrowdEntries() {
                   key={opt.label}
                   onClick={() => {
                     setDateRange(opt);
+                    setPageNumber(1);
                     setDateDropdownOpen(false);
                   }}
                   className={`
@@ -469,7 +481,7 @@ export default function CrowdEntries() {
       ========================================= */}
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 mt-5">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 
           {/* Previous */}
           <button

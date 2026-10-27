@@ -1,4 +1,5 @@
 import axios from "axios";
+import { clearCache } from "../utils/dataCache";
 
 const apiUrl = import.meta.env.VITE_API_URL;
 
@@ -8,6 +9,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 
 const api = axios.create({
   baseURL: apiUrl,
+  timeout: 12000,
   headers: { "Content-Type": "application/json" },
 });
 
@@ -31,6 +33,7 @@ api.interceptors.response.use(
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         localStorage.removeItem("selectedSiteId");
+        clearCache();
         window.location.href = "/login";
       }
     }
@@ -52,7 +55,6 @@ export async function login({ email, password }) {
     const res = await api.post("/api/auth/login", { email, password });
     return res.data;
   } catch (error) {
-    console.error("Login API error:", error);
     throw (
       error.response?.data || {
         message: "Unable to login. Please try again.",
